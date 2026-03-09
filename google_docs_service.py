@@ -32,9 +32,14 @@ def get_credentials():
             try:
                 creds.refresh(Request())
             except Exception:
-                logger.warning("Token refresh failed — re-authenticating via browser")
+                logger.exception("Token refresh failed")
                 creds = None
         if not creds:
+            if GOOGLE_TOKEN_JSON:
+                raise SystemExit(
+                    "Google token from GOOGLE_TOKEN_JSON is invalid and cannot be "
+                    "refreshed. Re-generate token.json locally and update the env var."
+                )
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, "w") as f:

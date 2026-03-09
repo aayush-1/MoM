@@ -136,6 +136,10 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Failed to transcribe voice note for '%s'", client_name)
         message_text = "[Voice note — transcription failed]"
+        try:
+            os.remove(ogg_path)
+        except OSError:
+            pass
 
     for attempt in range(2):
         try:
@@ -195,6 +199,9 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         tg_file = await photo.get_file()
+        if not tg_file.file_path:
+            logger.error("Telegram returned no file_path for photo in '%s'", client_name)
+            return
         if tg_file.file_path.startswith("http"):
             image_url = tg_file.file_path
         else:
