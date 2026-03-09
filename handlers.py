@@ -10,6 +10,7 @@ from google_docs_service import (
     get_services,
     find_or_create_doc,
     append_to_doc,
+    append_image_to_doc,
     find_doc,
     get_doc_link,
 )
@@ -150,6 +151,79 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         except Exception:
             logger.exception("FAILED to append voice note for '%s'", client_name)
+            return
+
+    try:
+        await update.message.set_reaction([ReactionTypeEmoji("👍")])
+    except Exception:
+        logger.warning("Could not set reaction")
+
+
+MAX_IMAGE_WIDTH_PT = 150
+
+
+async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photos: embed inline in the Google Doc using Telegram's file URL."""
+    if not update.message or not update.message.photo:
+        return
+
+    sender = update.message.from_user
+    if sender and sender.is_bot:
+        return
+
+    chat = update.effective_chat
+    if not chat or not chat.title or not chat.title.startswith(GROUP_PREFIX):
+        return
+
+    client_name = chat.title[len(GROUP_PREFIX):]
+    timestamp = update.message.date
+    caption = (update.message.caption or "").strip()
+
+    photo = update.message.photo[-1]  # highest resolution
+
+    logger.info(
+        "PHOTO RECEIVED | chat: '%s' | from: %s | size: %dx%d",
+        chat.title,
+        sender.username or sender.first_name if sender else "unknown",
+        photo.width,
+        photo.height,
+    )
+
+    aspect_ratio = photo.height / photo.width
+    image_width_pt = MAX_IMAGE_WIDTH_PT
+    image_height_pt = MAX_IMAGE_WIDTH_PT * aspect_ratio
+
+    try:
+        tg_file = await photo.get_file()
+        if tg_file.file_path.startswith("http"):
+            image_url = tg_file.file_path
+        else:
+            image_url = (
+                f"https://api.telegram.org/file/bot{context.bot.token}/{tg_file.file_path}"
+            )
+    except Exception:
+        logger.exception("Failed to get photo URL for '%s'", client_name)
+        return
+
+    for attempt in range(2):
+        try:
+            doc_id = find_or_create_doc(docs_service, drive_service, client_name)
+            append_image_to_doc(
+                docs_service, doc_id, image_url, caption, timestamp,
+                image_width_pt, image_height_pt,
+            )
+            logger.info("APPENDED photo for '%s'", client_name)
+            break
+        except RuntimeError:
+            if attempt == 0:
+                logger.warning(
+                    "Doc was deleted — retrying with fresh doc for '%s'", client_name
+                )
+                continue
+            logger.exception("FAILED to append photo for '%s' after retry", client_name)
+            return
+        except Exception:
+            logger.exception("FAILED to append photo for '%s'", client_name)
             return
 
     try:

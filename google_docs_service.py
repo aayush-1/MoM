@@ -181,3 +181,83 @@ def append_to_doc(docs_service, doc_id: str, message: str, timestamp: datetime):
 
 def get_doc_link(doc_id: str) -> str:
     return f"https://docs.google.com/document/d/{doc_id}/edit"
+
+
+def append_image_to_doc(
+    docs_service,
+    doc_id: str,
+    image_url: str,
+    caption: str,
+    timestamp: datetime,
+    image_width_pt: float = 150,
+    image_height_pt: float = 112,
+):
+    """Append an inline image (with optional caption) as a bullet point to the doc."""
+    from googleapiclient.errors import HttpError
+
+    try:
+        doc = docs_service.documents().get(documentId=doc_id).execute()
+    except HttpError as e:
+        if e.resp.status == 404:
+            _invalidate_cache(doc_id)
+            raise RuntimeError(
+                f"Doc {doc_id} not found (deleted?). Cache cleared — retry will create a new one."
+            )
+        raise
+
+    body_content = doc.get("body", {}).get("content", [])
+    end_index = body_content[-1]["endIndex"]
+    full_text = _extract_text(body_content)
+
+    date_str = timestamp.strftime("%d %B %Y")
+    date_heading = f"--- {date_str} ---"
+
+    requests = []
+    insert_index = end_index - 1
+
+    date_text = ""
+    if date_heading not in full_text:
+        logger.info("NEW DAY — adding heading '%s'", date_heading)
+        date_text = f"\n{date_heading}\n"
+
+    bullet_prefix = "  • "
+    text_before_image = date_text + bullet_prefix
+
+    requests.append(
+        {
+            "insertText": {
+                "location": {"index": insert_index},
+                "text": text_before_image,
+            }
+        }
+    )
+
+    image_insert_index = insert_index + len(text_before_image)
+    requests.append(
+        {
+            "insertInlineImage": {
+                "location": {"index": image_insert_index},
+                "uri": image_url,
+                "objectSize": {
+                    "width": {"magnitude": image_width_pt, "unit": "PT"},
+                    "height": {"magnitude": image_height_pt, "unit": "PT"},
+                },
+            }
+        }
+    )
+
+    # Inline image occupies exactly 1 index in the document model
+    after_image_index = image_insert_index + 1
+    suffix = f" {caption}\n" if caption else "\n"
+    requests.append(
+        {
+            "insertText": {
+                "location": {"index": after_image_index},
+                "text": suffix,
+            }
+        }
+    )
+
+    docs_service.documents().batchUpdate(
+        documentId=doc_id, body={"requests": requests}
+    ).execute()
