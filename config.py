@@ -18,4 +18,7 @@ GROUP_PREFIX = "MoM - "
 SCOPES = [
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/cloud-platform",
 ]
+
+SPEECH_LANGUAGE_CODES = ["hi-IN", "en-IN"]

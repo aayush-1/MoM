@@ -1,4 +1,6 @@
+import os
 import logging
+import tempfile
 
 from telegram import ReactionTypeEmoji, Update
 from telegram.ext import ContextTypes
@@ -11,6 +13,7 @@ from google_docs_service import (
     find_doc,
     get_doc_link,
 )
+from transcription_service import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -92,3 +95,64 @@ async def on_doc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     link = get_doc_link(doc_id)
     await update.message.reply_text(f"MoM for {client_name}:\n{link}")
+
+
+async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle voice notes: transcribe and append to Google Doc."""
+    if not update.message:
+        return
+
+    voice = update.message.voice or update.message.audio
+    if not voice:
+        return
+
+    sender = update.message.from_user
+    if sender and sender.is_bot:
+        return
+
+    chat = update.effective_chat
+    if not chat or not chat.title or not chat.title.startswith(GROUP_PREFIX):
+        return
+
+    client_name = chat.title[len(GROUP_PREFIX) :]
+    timestamp = update.message.date
+
+    logger.info(
+        "VOICE NOTE RECEIVED | chat: '%s' | from: %s | duration: %ss",
+        chat.title,
+        sender.username or sender.first_name if sender else "unknown",
+        getattr(voice, "duration", "?"),
+    )
+
+    ogg_path = os.path.join(
+        tempfile.gettempdir(), f"voice_{update.message.message_id}.ogg"
+    )
+    try:
+        tg_file = await voice.get_file()
+        await tg_file.download_to_drive(ogg_path)
+        transcript = transcribe_audio(ogg_path)
+        message_text = f"[Voice] {transcript}"
+    except Exception:
+        logger.exception("Failed to transcribe voice note for '%s'", client_name)
+        message_text = "[Voice note — transcription failed]"
+
+    for attempt in range(2):
+        try:
+            doc_id = find_or_create_doc(docs_service, drive_service, client_name)
+            append_to_doc(docs_service, doc_id, message_text, timestamp)
+            logger.info("APPENDED voice note for '%s': %s", client_name, message_text[:60])
+            break
+        except RuntimeError:
+            if attempt == 0:
+                logger.warning("Doc was deleted — retrying with fresh doc for '%s'", client_name)
+                continue
+            logger.exception("FAILED to append voice note for '%s' after retry", client_name)
+            return
+        except Exception:
+            logger.exception("FAILED to append voice note for '%s'", client_name)
+            return
+
+    try:
+        await update.message.set_reaction([ReactionTypeEmoji("👍")])
+    except Exception:
+        logger.warning("Could not set reaction")

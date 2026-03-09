@@ -3,7 +3,7 @@ import logging
 from telegram.ext import Application, MessageHandler, CommandHandler, filters
 
 from config import TELEGRAM_BOT_TOKEN
-from handlers import on_message, on_doc_command
+from handlers import on_message, on_doc_command, on_voice
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -22,6 +22,7 @@ def main():
 
     app.add_handler(CommandHandler("doc", on_doc_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
 
     logger.info("Bot is running. Press Ctrl+C to stop.")
     app.run_polling(allowed_updates=["message"])
